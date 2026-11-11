@@ -80,7 +80,4 @@ The core problems here are backend correctness: when to reuse a fact, stopping d
 - Let users change their favorite movie.
 
 ## AI usage
-
-- Used Claude to draft the implementation, tests, and README from the assignment spec.
 - Used it to reason through the concurrency design and the 60-second window edge cases.
-- Used it to verify behavior against a local Postgres (concurrent requests, fallbacks, auth adapter).
