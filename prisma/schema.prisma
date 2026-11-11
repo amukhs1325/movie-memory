@@ -1,0 +1,98 @@
+// Movie Memory data model.
+//
+// User, Account and Session follow the shape Auth.js expects from its Prisma
+// adapter (database sessions). MovieFact is the app's own table.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // Set once during onboarding. NULL means onboarding is not finished.
+  // Length matches the server-side validation limit (MOVIE_MAX_LENGTH).
+  favoriteMovie String? @db.VarChar(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  facts    MovieFact[]
+}
+
+// OAuth account link (one row per provider account). Managed by Auth.js.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Server-side session. The browser only holds an opaque session token, so
+// logging out (or deleting this row) revokes access immediately.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum FactStatus {
+  PENDING // a request has claimed this cache window and is calling OpenAI
+  READY   // content is filled in and can be served
+}
+
+// One row per generated fact. Rows are never updated after they become
+// READY, so the table doubles as a history of facts per user and movie.
+model MovieFact {
+  id      String     @id @default(cuid())
+  userId  String
+  // Snapshot of the title the fact is about, so facts stay correct even if
+  // the favorite movie were ever allowed to change.
+  movie   String     @db.VarChar(100)
+  content String?    @db.Text // NULL while PENDING
+  status  FactStatus @default(PENDING)
+
+  // floor(createdAt / 60 seconds). Together with the unique constraint below
+  // this guarantees at most ONE generation per user + movie per minute, even
+  // across many tabs, rapid refreshes, or multiple server instances.
+  cacheWindow Int
+
+  // Set by the app (not the DB clock) so createdAt and cacheWindow always
+  // come from the same timestamp.
+  createdAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, movie, cacheWindow])
+  // Serves "latest READY fact for this user + movie" as an index scan.
+  @@index([userId, movie, status, createdAt(sort: Desc)])
+}
